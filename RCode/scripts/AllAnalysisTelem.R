@@ -4,9 +4,11 @@
 ################################
 # Created by: Sophia Horigan
 # Contact: shorigan@uchicago.edu
-# Last updated: May 7, 2024
+# Last updated: May 9, 2024
 
-# This script takes in Movebank telemetry downloads, cleans and preps, then generates figures
+# This script takes in MoveBank telemetry downloads, cleans and preps, then generates figures
+rm(list=ls())
+
 
 library(lubridate)
 library(sp)
@@ -16,11 +18,11 @@ library(scales)
 library(maptools)
 library(ggplot2)
 library(ggmap)
+library(dplyr)
 
-rm(list=ls())
 #--------------------------------------------------------------------------------------------
 ## SET WD
-homedir <- "/Users/sophiahorigan/Documents/GitHub/mada-bat-telemetry/RCode"
+homedir <- "/Users/shorigan/Documents/GitHub/mada-bat-telemetry/RCode"
 setwd(homedir)
 
 #--------------------------------------------------------------------------------------------
@@ -28,29 +30,99 @@ setwd(homedir)
 points.df <- read.csv(paste0(homedir,"/input/Movebank-AllTags-AllSensorTypes-06072024.csv"), header = TRUE)
 
 #--------------------------------------------------------------------------------------------
-## MODIFY DATA
-
-# convert timestamp column 
-(points.df$timestamp <- ymd_hms(points.df$timestamp))
-
-# change time zone to Madagascar
-points.df$timestamp <- with_tz(points.df$timestamp, "Africa/Addis_Ababa")
-
-# add column for daytime or nighttime
-
-# add column for month
-
-# add column for season
-
-# add column for sex
-
-#--------------------------------------------------------------------------------------------
 ## BASIC STATS
 
-# counts per bat
+# cleanup
+# convert timestamp column 
+points.df$timestamp <- ymd_hms(points.df$timestamp)
+# change time zone to Madagascar
+points.df$timestamp <- with_tz(points.df$timestamp, "Africa/Addis_Ababa")
+# add site column
+points.df <- points.df %>% 
+  mutate(site = case_when(grepl("MAN", individual.local.identifier) ~ 'Ambositra - P',
+                          grepl("ANA", individual.local.identifier) ~ 'Analambotaka - P',
+                          grepl("TSI", individual.local.identifier) ~ 'Marotsipohy - P',
+                          grepl("MARO", individual.local.identifier) ~ 'Marovitsika - P',
+                          grepl("HAR", individual.local.identifier) ~ 'Nosy Hara - P',
+                          grepl("KEL", individual.local.identifier) ~ 'Angavokely - E',
+                          grepl("LOR", individual.local.identifier) ~ 'Ambositra - E',
+                          grepl("NAT", individual.local.identifier) ~ 'Mangroves - P',
+                          grepl("VHL", individual.local.identifier) ~ 'Vahialava - P',
+                          grepl("KEL", individual.local.identifier) ~ 'Angavokely - E',
+                          grepl("WAY", individual.local.identifier) ~ 'Ankarana - E'))
+
 table(points.df$individual.local.identifier)
-# drop any that have less than 5 data points
+# drop any that have less than 5 data points (right now just 1)
 points.df <- points.df[!(points.df$individual.local.identifier %in% "LOR002"),]
+
+
+# DAY VS NIGHT
+dusk_hour = 18 # made up 
+dawn_hour = 5
+
+points.df <- points.df %>%
+                mutate(daytime = ifelse(hour(timestamp) < dusk_hour & hour(timestamp) > dawn_hour, "day", "night"))
+points.df %>% 
+  group_by(individual.taxon.canonical.name)  %>%
+    count(daytime)
+
+daytime.df <- points.df[, c("individual.local.identifier", "site", "daytime", "location.long", "location.lat")]
+
+# by individual
+ggplot(data = daytime.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour = daytime)) +
+  facet_wrap(individual.local.identifier ~ ., scales = 'free')
+
+# by site
+ggplot(data = daytime.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour = daytime)) +
+  facet_wrap(site ~ ., scales = 'free')
+  
+# color by site shape by individual
+ggplot(data = daytime.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour = daytime), shape = as.factor(daytime.df$individual.local.identifier)) +
+  facet_wrap(site ~ ., scales = 'free')
+
+
+# SEASON
+May = 5 # from Andrianiaina et al 2022
+October = 10
+
+points.df <- points.df %>%
+                mutate(season = ifelse(month(timestamp) < May | month(timestamp) > October, "wet", "dry"))
+
+points.df %>%  # both species
+  count(season)
+
+points.df %>%  # by species
+  group_by(individual.taxon.canonical.name)  %>%
+    count(season)
+
+season.df <- points.df[, c("individual.local.identifier", "site", "season", "location.long", "location.lat")]
+
+# by individual bat
+ggplot(data = season.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour=season)) +
+  facet_wrap(individual.local.identifier ~ ., scales = 'free')
+
+# group by site 
+ggplot(data = season.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour=season)) +
+  facet_wrap(site ~ ., scales = 'free')
+
+# group by site shape by individual
+# could larger daytime movement indicate a more disturbed roost??????!
+ggplot(data = season.df, aes(location.long, location.lat)) + 
+  geom_point(aes(colour = season), shape = as.factor(season.df$individual.local.identifier)) +
+  facet_wrap(site ~ ., scales = 'free')
+
+# MONTH
+points.df %>%
+  count(month(timestamp)) # both species
+
+points.df %>%
+  group_by(individual.taxon.canonical.name)  %>%
+  count(month(timestamp)) # by species
 
 # TAG ACTIVITY
 # make df with just tag id, start and end of deployment
@@ -62,6 +134,22 @@ tag_duration <- as.duration(points.df$tag_interval)
 tag_period <- as.period(time.interval)
 
 # ROOST VS COMMUTING VS FORAGING
+points.df <- points.df %>%
+  mutate(season = ifelse(month(timestamp) < May | month(timestamp) > October, "wet", "dry"))
+
+# distance from previous point
+points.df <- points.df %>%
+  mutate(loc_diff = ifelse(month(timestamp) < May | month(timestamp) > October, "wet", "dry"))
+
+# close to roost?
+points.df <- points.df %>%
+  mutate(loc_diff = ifelse(month(timestamp) < May | month(timestamp) > October, "wet", "dry"))
+
+points.df <- points.df %>% 
+                group_by(individual.local.identifier) %>%
+                    mutate(activity = case_when((daytime == 'day') ~ 'roosting',
+                                                (loc_diff < 5 & daytime == 'night') ~ 'foraging', # less than 5 m apart for foraging?
+                                                TRUE ~ 'commuting')) # everything else
 
 #--------------------------------------------------------------------------------------------
 ## FORMAT FOR SPATIAL ANALYSIS
@@ -211,6 +299,13 @@ mymap.paths <-ggmap(mybasemap) +
 
 #--------------------------------------------------------------------------------------------
 ## FIGURE 3 - MOST LIKELY DISTANCE MOVED ??
+
+# by month
+# by season
+# annual
+
+#--------------------------------------------------------------------------------------------
+## FIGURE 4 - PROB INTERMINGLING ??
 
 # by month
 # by season
