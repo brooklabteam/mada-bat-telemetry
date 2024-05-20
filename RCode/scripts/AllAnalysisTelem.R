@@ -19,10 +19,11 @@ library(maptools)
 library(ggplot2)
 library(ggmap)
 library(dplyr)
+library(amt)
 
 #--------------------------------------------------------------------------------------------
 ## SET WD
-homedir <- "/Users/shorigan/Documents/GitHub/mada-bat-telemetry/RCode"
+homedir <- "/Users/sophiahorigan/Documents/GitHub/mada-bat-telemetry/RCode"
 setwd(homedir)
 
 #--------------------------------------------------------------------------------------------
@@ -30,7 +31,7 @@ setwd(homedir)
 points.df <- read.csv(paste0(homedir,"/input/Movebank-AllTags-AllSensorTypes-06072024.csv"), header = TRUE)
 
 #--------------------------------------------------------------------------------------------
-## BASIC STATS
+## CLEAN DATA
 
 # cleanup
 # convert timestamp column 
@@ -56,7 +57,8 @@ table(points.df$individual.local.identifier)
 points.df <- points.df[!(points.df$individual.local.identifier %in% "LOR002"),]
 
 
-# DAY VS NIGHT
+#--------------------------------------------------------------------------------------------
+## DAY VS NIGHT
 dusk_hour = 18 # made up 
 dawn_hour = 5
 
@@ -79,12 +81,13 @@ ggplot(data = daytime.df, aes(location.long, location.lat)) +
   facet_wrap(site ~ ., scales = 'free')
   
 # color by site shape by individual
+# could larger daytime movement indicate a more disturbed roost??????!
 ggplot(data = daytime.df, aes(location.long, location.lat)) + 
   geom_point(aes(colour = daytime), shape = as.factor(daytime.df$individual.local.identifier)) +
   facet_wrap(site ~ ., scales = 'free')
 
-
-# SEASON
+#--------------------------------------------------------------------------------------------
+## SEASON
 May = 5 # from Andrianiaina et al 2022
 October = 10
 
@@ -111,12 +114,12 @@ ggplot(data = season.df, aes(location.long, location.lat)) +
   facet_wrap(site ~ ., scales = 'free')
 
 # group by site shape by individual
-# could larger daytime movement indicate a more disturbed roost??????!
 ggplot(data = season.df, aes(location.long, location.lat)) + 
   geom_point(aes(colour = season), shape = as.factor(season.df$individual.local.identifier)) +
   facet_wrap(site ~ ., scales = 'free')
 
-# MONTH
+#--------------------------------------------------------------------------------------------
+## MONTH
 points.df %>%
   count(month(timestamp)) # both species
 
@@ -124,7 +127,9 @@ points.df %>%
   group_by(individual.taxon.canonical.name)  %>%
   count(month(timestamp)) # by species
 
-# TAG ACTIVITY
+#--------------------------------------------------------------------------------------------
+## TAG ACTIVITY
+
 # make df with just tag id, start and end of deployment
 # interval of tag activity
 tag_interval <- start %--% end # NEEDS TO BE FIXED TO BE FOR EACH TAG ID
@@ -193,7 +198,7 @@ points.geo <- data.frame(id = points.sp.geo@data$individual.local.identifier, # 
 
 # Plot imagery + points + paths
 mymap.paths <-ggmap(mybasemap) + 
-  geom_point(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id))) +
+  geom_point(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id)), size = 1) +
   geom_path(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id))) +
   theme(legend.position = c(0.15, 0.80)) +
   labs(x = "Longitude", y = "Latitude") 
@@ -251,51 +256,117 @@ mymap.hr
 
 
 #--------------------------------------------------------------------------------------------
-## FIGURE 2 - KERNAL DENSITIES
+## KERNAL DENSITIES
 
-kernel.ref <- kernelUD(points.sp, h = "href")  # href = the reference bandwidth
-image(kernel.ref) # plot
-kernel.ref[[1]]@h # The smoothing factor is stored for each animal in the "h" slot
+# calculate kernal densities
+kernel.ref <- kernelUD(points.sp, h = "href")
+image(kernel.ref)
 
-kernel.lscv <- kernelUD(points.sp, h = "LSCV") # Least square cross validation smoothing 
-image(kernel.lscv) # plot
+# get volume
+kernel.vud <- getvolumeUD(kernel.ref)
 
-plotLSCV(kernel.lscv) # Look for a dip
+# get contour
+levels <- c(25, 50, 75, 95, 100)
+list <- vector(mode = "list", length = length(kernel.vud))
 
-points.kernel.poly.95 <- getverticeshr(kernel.ref, percent = 95) 
-points.kernel.poly.50 <- getverticeshr(kernel.ref, percent = 50) 
-print(points.kernel.poly.50)  # returns the area of each polygon
+for (i in 1:length(kernel.vud)){
+  list[[i]] <- as.image.SpatialGridDataFrame(kernel.vud[[i]])
+}
 
-plot(points.kernel.poly.50, col = as.factor(points.kernel.poly.50@data$id))
-plot(points.kernel.poly.95)
-plot(points.kernel.poly.)
-plot(points.sp, add = TRUE, col = as.factor(points.kernel.poly.95@data$id), pch = 21)
+# plot
+par(mfrow = c(6,4))
+
+for (i in 1:length(kernel.vud)){
+  plot(kernel.vud[[i]])
+  contour(list[[i]], add = TRUE, levels = levels)
+}
+
+# calculate home range area
+# grid size issues
+homerange <- kernel.area(kernel.ref, percent = seq(50, 95, by=5))
+plot(homerange)
 
 
-## Satellite imagery
-register_google(key = "AIzaSyCwa0OOmg7nRXgOrBZgBxgvmdn1h_bIO7g")
-## The location argument can take a vector with latitude and longitude, or a character string. 
-mybasemap <- get_map(location = c(lon = mean(points.sp@coords[,1]) , 
-                                  lat = mean(points.sp@coords[,2])), 
-                     source = "google", zoom = 9, maptype = 'satellite')
-ggmap(mybasemap)
+#--------------------------------------------------------------------------------------------
+## HOME RANGE OVERLAP
 
-# Turn the spatial data frame of points into just a dataframe for plotting in ggmap
-points.geo <- data.frame(id = points.sp.geo@data$individual.local.identifier, # add individual identifier
-                         points.sp.geo@coords) # Add coordinates
+# remove duplicate points
+test <- points.df %>% distinct(location.lat, location.lat, .keep_all = TRUE)
 
-# Plot imagery + points + paths
-mymap.paths <-ggmap(mybasemap) + 
-  geom_point(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id))) +
-  geom_path(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id))) +
-  theme(legend.position = c(0.15, 0.80)) +
-  labs(x = "Longitude", y = "Latitude") 
-#scale_colour_manual(name = "Animal number",
-#                   values = c("black", "red", "green", "yellow", "purple", "blue", "pink", "orange"))
+# Make an amt `track` object with our sample data set
+points_track <- test %>%
+  # Remove NA x and y rows
+  filter(!is.na(location.lat), !is.na(location.long)) %>%
+  # Make track with coordinates, date-time, id
+  make_track(location.long, location.lat, timestamp, id = individual.local.identifier,
+             # Make sure to specify coordinate reference system (CRS)
+             crs = "EPSG:4326") %>%
+  # Use nest() to allow us to deal with multiple animals (5 in sample set)
+  # Each animal's track is stored in a tibble (table) nested within the data column
+  nest(data = -"id") %>%
+  arrange(id)
 
-# by month
-# by season
-# annual
+# Examine object. It is a tibble with a row for each individual. 
+#The value of 'data' contains the nested track_xyt object for each individual
+points_track
+
+# Examine one individual's track
+head(points_track$data[1])
+
+# Add MCP list-column to track using `map`
+points_track <- points_track %>% 
+  mutate(mcp = map(data, function(x) 
+    # levels are for which proportions (1.0 = 100%)
+    x %>% hr_mcp(levels = c(1.0)))) 
+
+# Each id's MCP is stored in the list column "mcp"
+# Check by plotting the first one
+plot(points_track$mcp[[1]])
+
+# Calculate overlap between T002 (row 2) and T004 (row 4)
+# labels are from ID in track object 
+# overlap is fraction of overlap between two home ranges
+hr_overlap(points_track$mcp[[2]], 
+           points_track$mcp[[4]], 
+           labels = points_track$id[c(2,4)],
+           type = "hr")
+
+# Calculate overlap between all
+points_hr_overlap <- hr_overlap(points_track$mcp,
+                                labels = points_track$id, 
+                                which = "all", 
+                                # alternative which = "consecutive",
+                                # "one_to_all"
+                                conditional = FALSE)
+
+head(points_hr_overlap)
+
+
+# Make a track of the data that is not nested.
+points_track_nonest <- points.df %>%
+  dplyr::select(location.lat, location.long, timestamp, individual.local.identifier) %>%
+  make_track(location.lat, location.long, timestamp, id = individual.local.identifier)
+
+points_track_nonest <- points.df %>%
+  # Remove NA x and y rows
+  make_track(location.long, location.lat, timestamp, id = individual.local.identifier,
+             # Make sure to specify coordinate reference system (CRS)
+             crs = "EPSG:4326")
+
+
+# Make a base raster for whole study. Without this common raster, 
+# each Kernel Density Estimator will likely use different pixel sizes and 
+# output of hr_overlap will be blank.
+base_trast <- make_trast(points_track_nonest,
+                         res = 50)
+
+# Calculate the kernel density estimator for two turtles at 95%
+hr_245091 <- hr_kde(points_track$data[2][[1]], trast = base_trast, levels = 0.95)
+hr_245093 <- hr_kde(points_track$data[4][[1]], trast = base_trast, levels = 0.95)
+
+hr_overlap(hr_245091, hr_245093, type = "vi", conditional = FALSE)
+
+
 
 #--------------------------------------------------------------------------------------------
 ## FIGURE 3 - MOST LIKELY DISTANCE MOVED ??
@@ -304,12 +375,27 @@ mymap.paths <-ggmap(mybasemap) +
 # by season
 # annual
 
-#--------------------------------------------------------------------------------------------
-## FIGURE 4 - PROB INTERMINGLING ??
 
-# by month
-# by season
-# annual
+
+
+
+
+#--------------------------------------------------------------------------------------------
+## FUCKING AROUND
+## Satellite imagery
+register_google(key = "AIzaSyCwa0OOmg7nRXgOrBZgBxgvmdn1h_bIO7g")
+## The location argument can take a vector with latitude and longitude, or a character string. 
+mybasemap <- get_map(location = c(lon = mean(points.sp@coords[,1]) , 
+                                  lat = mean(points.sp@coords[,2])), 
+                     source = "google", zoom = 6, maptype = 'satellite')
+ggmap(mybasemap, extent="normal") + 
+  geom_density2d(data = points.df, aes(x=location.long, y=location.lat, group=individual.local.identifier, colour=individual.local.identifier))
+
+ggmap(mybasemap, extent="normal") + 
+  geom_density2d(data = points.df, aes(x=location.long, y=location.lat, group=site, colour=site))
+
+
+
 
 
 
