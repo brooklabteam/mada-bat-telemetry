@@ -20,15 +20,17 @@ library(ggplot2)
 library(ggmap)
 library(dplyr)
 library(amt)
+library(geosphere)
+library(sf)
 
 #--------------------------------------------------------------------------------------------
 ## SET WD
-homedir <- "/Users/sophiahorigan/Documents/GitHub/mada-bat-telemetry/RCode"
+homedir <- "/Users/shorigan/Documents/GitHub/mada-bat-telemetry/RCode"
 setwd(homedir)
 
 #--------------------------------------------------------------------------------------------
 ## LOAD DATA
-points.df <- read.csv(paste0(homedir,"/input/Movebank-AllTags-AllSensorTypes-06072024.csv"), header = TRUE)
+points.df <- read.csv(paste0(homedir,"/input/Movebank-AllTags-AllSensorTypes-06182024.csv"), header = TRUE)
 
 #--------------------------------------------------------------------------------------------
 ## CLEAN DATA
@@ -44,7 +46,7 @@ points.df <- points.df %>%
                           grepl("ANA", individual.local.identifier) ~ 'Analambotaka - P',
                           grepl("TSI", individual.local.identifier) ~ 'Marotsipohy - P',
                           grepl("MARO", individual.local.identifier) ~ 'Marovitsika - P',
-                          grepl("HAR", individual.local.identifier) ~ 'Nosy Hara - P',
+                          grepl("HAR", individual.local.identifier) ~ 'Nosy Hara - E',
                           grepl("KEL", individual.local.identifier) ~ 'Angavokely - E',
                           grepl("LOR", individual.local.identifier) ~ 'Ambositra - E',
                           grepl("NAT", individual.local.identifier) ~ 'Mangroves - P',
@@ -157,6 +159,13 @@ points.df <- points.df %>%
                                                 TRUE ~ 'commuting')) # everything else
 
 #--------------------------------------------------------------------------------------------
+## SUBSET TO JUST EIDOLON - optional
+
+points.df <- points.df[points.df$individual.taxon.canonical.name == 'Eidolon dupreanum',]
+
+table(points.df$individual.local.identifier)
+
+#--------------------------------------------------------------------------------------------
 ## FORMAT FOR SPATIAL ANALYSIS
 
 # To format for spatial analyses, we need to remove NA values from the coordinate columns
@@ -198,8 +207,8 @@ points.geo <- data.frame(id = points.sp.geo@data$individual.local.identifier, # 
 
 # Plot imagery + points + paths
 mymap.paths <-ggmap(mybasemap) + 
-  geom_point(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id)), size = 1) +
-  geom_path(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = as.factor(id))) +
+  geom_point(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = id), size = 1) +
+  geom_path(data = points.geo, aes(x = coords.x1, y = coords.x2, colour = id)) +
   theme(legend.position = c(0.15, 0.80)) +
   labs(x = "Longitude", y = "Latitude") 
 #scale_colour_manual(name = "Animal number",
@@ -381,7 +390,7 @@ hr_overlap(hr_245091, hr_245093, type = "vi", conditional = FALSE)
 
 
 #--------------------------------------------------------------------------------------------
-## FUCKING AROUND
+## TMP
 ## Satellite imagery
 register_google(key = "AIzaSyCwa0OOmg7nRXgOrBZgBxgvmdn1h_bIO7g")
 ## The location argument can take a vector with latitude and longitude, or a character string. 
@@ -393,6 +402,27 @@ ggmap(mybasemap, extent="normal") +
 
 ggmap(mybasemap, extent="normal") + 
   geom_density2d(data = points.df, aes(x=location.long, y=location.lat, group=site, colour=site))
+
+
+# export eidolon roosts as shp file
+tmp <- Eidolon_roosts
+tmp <- tmp %>%
+  select(Roost.ID, location.lat, location.long)
+
+
+plot_locations_sp_eidolon <- st_as_sf(tmp, coords = c("easting", "northing"), crs = utm18nCRS)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
